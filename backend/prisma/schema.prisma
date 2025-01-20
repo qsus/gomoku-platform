@@ -1,0 +1,27 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id          String @id @default(cuid())
+  email       String? @unique
+  displayName String @unique
+  passHash    String
+  createdAt   DateTime @default(now())
+
+  Game Game[]
+}
+
+
+model Game {
+  id          String @id @default(cuid())
+  gameState   Json
+  createdAt   DateTime @default(now())
+
+  players     Account[] // TODO: ensure correct order
+}
