@@ -101,7 +101,7 @@ export class SocketRouter {
 			})
 
 			// handle all events
-			socket.onAny((event: string, requestData: any, callback: any) => {
+			socket.onAny(async (event: string, requestData: any, callback: any) => {
 				// verify callback type
 				if (!isCallback(callback)) {
 					console.warn("User sent an event without callback. Event name: " + event);
@@ -114,25 +114,17 @@ export class SocketRouter {
 						callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
 						return;
 					}
-	
-					// call authenticator
-					this.authenticator.login(requestData.displayName, requestData.password).then((account: Account | false) => {
-						if (account === false) {
-							callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
-							return;
-						}
-						
-						socket.data.account = account;
-						callback({ success: true, message: "Logged in" }, { displayName: account.displayName });
-					}).catch((e) => {
-						if (e instanceof InvalidPasswordError) {
-							callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
-						} else if (e instanceof AccountNotFoundError) {
-							callback({ success: false, error: ErrorType.Other, message: "Account not found" });
-						} else {
-							callback({ success: false, error: ErrorType.Other, message: "Failed to login, unknown error\n" + e });
-						}
-					});
+
+					try {
+						await this.login(socket, requestData, callback);
+					} catch (e) {
+						callback({ success: false, error: ErrorType.Other, message: "Server error. Report to administrator. Debug data: " + e.message + e });
+						console.log(e);
+						return;
+					}
+					// If callback is called for the second time, it will be ignored
+					// Could be used to notify the client about errors, but is disabled
+					//callback({ success: false, error: ErrorType.Other, message: "Server error: SocketRouter forgot to call callback." });
 				} else if (event === 'register') {
 					//
 				} else { // unknown event
@@ -143,8 +135,20 @@ export class SocketRouter {
 		});
 	}
 
-	private login(requestData: LoginEvent): any {
-		throw new Error("Method not implemented.");
+	private async login(socket: Socket, requestData: LoginEvent, callback: Callback): Promise<void> {
+		try {
+			let account = await this.authenticator.login(requestData.displayName, requestData.password);
+			socket.data.account = account;
+			callback({ success: true, message: "Logged in" }, { displayName: account.displayName });
+		} catch (e) {
+			if (e instanceof AccountNotFoundError) {
+				callback({ success: false, error: ErrorType.Other, message: e.message });
+			} else if (e instanceof InvalidPasswordError) {
+				callback({ success: false, error: ErrorType.Other, message: e.message });
+			} else {
+				throw e;
+			}
+		}
 	}
 
 	/**
