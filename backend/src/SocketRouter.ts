@@ -27,39 +27,6 @@ export class SocketRouter {
 				console.log('user disconnected');
 			});
 
-			socket.on('login', (requestData: { displayName: string, password: string }, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent a login event without callback");
-					return;
-				}
-				// verify parameter types (typeof can detect undefined)
-				if (typeof requestData.displayName !== 'string' || typeof requestData.password !== 'string') {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-					return;
-				}
-
-				// call authenticator
-				this.authenticator.login(requestData.displayName, requestData.password).then((account: Account | false) => {
-					if (account === false) {
-						callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
-						return;
-					}
-					
-					socket.data.account = account;
-					callback({ success: true, message: "Logged in" }, { displayName: account.displayName });
-				}).catch((e) => {
-					if (e instanceof InvalidPasswordError) {
-						callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
-					} else if (e instanceof AccountNotFoundError) {
-						callback({ success: false, error: ErrorType.Other, message: "Account not found" });
-					} else {
-						callback({ success: false, error: ErrorType.Other, message: "Failed to login, unknown error\n" + e });
-					}
-				});
-				
-			});
-
 			socket.on('register', (requestData: { displayName: string, password: string, email: string }, callback: Callback) => {
 				// verify callback type
 				if (typeof callback !== 'function') {
@@ -133,18 +100,51 @@ export class SocketRouter {
 				
 			})
 
-			// default handler for unknown events; TODO: could allow override using this.setDefaultEvent
-			socket.onAny((event: string, requestData: any[], callback: Callback) => {
-				if (!socket.listeners(event).length) {
-					try {
-						callback({ success: false, error: ErrorType.Other, message: "No handler for event: " + event });
-						console.warn("User sent an unknown event: " + event);
-					} catch (e) { // TODO: more precise error handling
-						console.warn("User sent an unknown event and without callback. Event name: " + event);
+			// handle all events
+			socket.onAny((event: string, requestData: any, callback: any) => {
+				// verify callback type
+				if (!isCallback(callback)) {
+					console.warn("User sent an event without callback. Event name: " + event);
+					return;
+				}
+
+				if (event === 'login') {
+					// verify requestData type using isValidRequestData
+					if (!isLoginEvent(requestData)) {
+						callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
+						return;
 					}
+	
+					// call authenticator
+					this.authenticator.login(requestData.displayName, requestData.password).then((account: Account | false) => {
+						if (account === false) {
+							callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
+							return;
+						}
+						
+						socket.data.account = account;
+						callback({ success: true, message: "Logged in" }, { displayName: account.displayName });
+					}).catch((e) => {
+						if (e instanceof InvalidPasswordError) {
+							callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
+						} else if (e instanceof AccountNotFoundError) {
+							callback({ success: false, error: ErrorType.Other, message: "Account not found" });
+						} else {
+							callback({ success: false, error: ErrorType.Other, message: "Failed to login, unknown error\n" + e });
+						}
+					});
+				} else if (event === 'register') {
+					//
+				} else { // unknown event
+					callback({ success: false, error: ErrorType.Other, message: "No handler for event: " + event });
+					console.warn("User sent an unknown event: " + event);
 				}
 			});
 		});
+	}
+
+	private login(requestData: LoginEvent): any {
+		throw new Error("Method not implemented.");
 	}
 
 	/**
@@ -175,7 +175,7 @@ export class SocketRouter {
 					status = { success: true };
 				} catch (e) {
 					// detect error type
-					if (e instanceof NotAuthenticatedErrorExample) {
+					if (false) { // some condition
 						status = { success: false, error: ErrorType.NotAuthenticated, message: e.message };
 					} else { // bunch of another else ifs such as incorrect arguments
 						// unknown server-side error, please report to administrator
@@ -204,11 +204,14 @@ type ServerFunction = (...receivedArgs: any[]) => any;
  * Socket.io callback.
  */
 type Callback = (status: Status, result?: any) => void;
+function isCallback(obj: any): obj is Callback {
+	return typeof obj === 'function';
+}
 
-// TODO: move to error.ts
-class NotAuthenticatedErrorExample extends Error {
-	constructor(message: string) {
-		super(message);
-		this.name = "CustomError";
-	}
+type LoginEvent = {
+	displayName: string,
+	password: string
+}
+function isLoginEvent(obj: any): obj is LoginEvent {
+	return obj.displayName && obj.password;
 }
