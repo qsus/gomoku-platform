@@ -108,29 +108,43 @@ export class SocketRouter {
 					return;
 				}
 
-				if (event === 'login') {
-					// verify requestData type using isValidRequestData
-					if (!isLoginEvent(requestData)) {
-						callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-						return;
-					}
+				let routingTable: {
+					[eventName: string]:
+						[typeGuard: (requestData: any) => boolean,
+						serverFunction: (socket: Socket, requestData: any, callback: Callback) => Promise<void>]
+				} = {
+					// eventName, type guard, function
+					'login': [isLoginEvent, this.login],
+				}
 
-					try {
-						await this.login(socket, requestData, callback);
-					} catch (e) {
-						callback({ success: false, error: ErrorType.Other, message: "Server error. Report to administrator. Debug data: " + e.message + e });
-						console.log(e);
-						return;
-					}
-					// If callback is called for the second time, it will be ignored
-					// Could be used to notify the client about errors, but is disabled
-					//callback({ success: false, error: ErrorType.Other, message: "Server error: SocketRouter forgot to call callback." });
-				} else if (event === 'register') {
-					//
-				} else { // unknown event
+				// check if event is in routing table
+				if (!(event in routingTable)) {
 					callback({ success: false, error: ErrorType.Other, message: "No handler for event: " + event });
 					console.warn("User sent an unknown event: " + event);
+					return;
 				}
+
+				// load type guard and server function
+				let [typeGuard, serverFunction] = routingTable[event];
+
+				// verify requestData type
+				if (!typeGuard(requestData)) {
+					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
+					return;
+				}
+
+				try {
+					// even though requestData is any, it is checked by typeGuard
+					// bind is used to pass the correct "this" (SocketRouter)
+					await serverFunction.bind(this)(socket, requestData, callback);
+				} catch (e) {
+					callback({ success: false, error: ErrorType.Other, message: "Server error. Report to administrator. Debug data: " + e });
+					console.log(e);
+					return;
+				}
+				// If callback is called for the second time, it will be ignored
+				// Could be used to notify the client about errors, but is disabled
+				//callback({ success: false, error: ErrorType.Other, message: "Server error: SocketRouter forgot to call callback." });
 			});
 		});
 	}
