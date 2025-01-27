@@ -5,9 +5,8 @@
 
 import { Server, Socket } from "socket.io";
 import { ErrorType, Status } from "./Transport/Status";
-import { GameServer, GameSettings } from "./GameServer";
 import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
-import { Account } from "@prisma/client";
+import { PrismaClient } from "@prisma/client";
 
 /**
  * Provides websocket API for clients.
@@ -17,7 +16,7 @@ export class SocketRouter {
 	public constructor(
 		private io: Server,
 		private authenticator: Authenticator,
-		private app: GameServer
+		private prisma: PrismaClient,
 	) {
 		this.io.on('connection', (socket) => {
 			console.log('user connected');
@@ -91,20 +90,35 @@ export class SocketRouter {
 					return;
 				}
 
-				// start game
-				let gameSettings = GameServer.getPresetSettings('gomoku');
-				try {
-					let game = await this.app.startGame(gameSettings);
-					callback({ success: true, message: "Started game" }, game);
-				} catch (e) {
-					callback({ success: false, error: ErrorType.Other, message: "Failed to start game" });
-					return;
-				}
+				// prepare board
+				let gameSettings = { boardSizeX: 15, boardSizeY: 15 };
+				let board = Array.from({ length: gameSettings.boardSizeY }, () => Array(gameSettings.boardSizeX).fill(''));
+				board[0][0] = 'b'; // example
+				board[0][1] = 'w'; // example
+		
+				let game = await this.prisma.game.create({
+					data: {
+						gameState: {
+							board: board
+						}
+					}
+				})
+				this.notifyGameList();
+
+				callback({ success: true, message: "Started game" }, game);
 			})));
 
 			socket.on('listenGameList', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
 				socket.join('gameList');
 				callback({ success: true, message: "Listening to game list" });
+			})));
+
+			socket.on('listenGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				// verify request format
+				if (!isListenGameRequest(requestData)) throw new Error("Invalid request format");
+				
+				socket.join("game:" + requestData.gameId);
+				callback({ success: true, message: "Listening to game" });
 			})));
 
 			socket.onAny((eventName, ...args) => {
@@ -152,6 +166,18 @@ export class SocketRouter {
 			return await serverFunction(data, callback);
 		}
 	}
+
+	private async notifyGameList() {
+		let games = await this.prisma.game.findMany();
+		let response = games.map(game => game.id);
+		this.io.to('gameList').emit('gameList', response);
+	}
+
+	private async notifyGameStatus(gameId: string) {
+		// TODO
+		let game = await this.prisma.game.findUnique({ where: { id: gameId } });
+		this.io.to(gameId).emit('gameStatus', game?.gameState);
+	}
 }
 
 /**
@@ -187,4 +213,11 @@ type RegisterRequest = {
 }
 function isRegisterRequest(data: any): data is RegisterRequest {
 	return typeof data.displayName === 'string' && typeof data.password === 'string' && typeof data.email === 'string';
+}
+
+type ListenGameRequest = {
+	gameId: string
+}
+function isListenGameRequest(data: any): data is ListenGameRequest {
+	return typeof data.gameId === 'string';
 }
