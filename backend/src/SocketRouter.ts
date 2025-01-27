@@ -27,79 +27,6 @@ export class SocketRouter {
 				console.log('user disconnected');
 			});
 
-			socket.on('register', (requestData: { displayName: string, password: string, email: string }, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent a register event without callback");
-					return;
-				}
-				// verify parameter types (typeof can detect undefined)
-				if (typeof requestData.displayName !== 'string' || typeof requestData.password !== 'string' || typeof requestData.email !== 'string') {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-					return;
-				}
-
-				// call authenticator
-				this.authenticator.register(requestData.displayName, requestData.password, requestData.email).then((account: Account) => {
-					socket.data.account = account;
-					callback({ success: true, message: "Registered" }, { displayName: account.displayName });
-				}).catch((e) => {
-					callback({ success: false, error: ErrorType.Other, message: "Failed to register" });
-				})
-			});
-
-			socket.on('unregister', (requestData: {}, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent an unregister event without callback");
-					return;
-				}
-
-				if (!socket.data.account) {
-					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
-					return;
-				}
-
-				// call authenticator
-				this.authenticator.unregister(socket.data.account.userId).then(() => {
-					callback({ success: true, message: "Unregistered" });
-				}).catch((err: Error) => {
-					callback({ success: false, error: ErrorType.Other, message: "Failed to unregister" });
-				})
-			});
-
-			socket.on('createGame', (requestData: { gameType: string }, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent a startGame event without callback");
-					return;
-				}
-				// verify parameter types (typeof can detect undefined)
-				if (typeof requestData.gameType !== 'string') {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-					return;
-				}
-
-				if (!socket.data.account) {
-					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
-					return;
-				}
-
-				let gameSettings: GameSettings = {
-					boardSizeX: 15,
-					boardSizeY: 15,
-					type: requestData.gameType
-				}
-				// call app
-				this.app.startGame(gameSettings).then(( game: any ) => {
-					callback({ success: true, message: "Started game" });
-					socket.emit('alert', { message: game });
-				}).catch((err: Error) => {
-					callback({ success: false, error: ErrorType.Other, message: "Failed to start game\n" + err });
-				})
-				
-			})
-
 			// handle all events
 			socket.onAny(async (event: string, requestData: any, callback: any) => {
 				// verify callback type
@@ -108,24 +35,15 @@ export class SocketRouter {
 					return;
 				}
 
-				let routingTable: {
-					[eventName: string]:
-						[typeGuard: (requestData: any) => boolean,
-						serverFunction: (socket: Socket, requestData: any, callback: Callback) => Promise<void>]
-				} = {
-					// eventName, type guard, function
-					'login': [isLoginEvent, this.login],
-				}
-
 				// check if event is in routing table
-				if (!(event in routingTable)) {
+				if (!(event in this.routingTable)) {
 					callback({ success: false, error: ErrorType.Other, message: "No handler for event: " + event });
 					console.warn("User sent an unknown event: " + event);
 					return;
 				}
 
 				// load type guard and server function
-				let [typeGuard, serverFunction] = routingTable[event];
+				let [typeGuard, serverFunction] = this.routingTable[event];
 
 				// verify requestData type
 				if (!typeGuard(requestData)) {
@@ -149,6 +67,18 @@ export class SocketRouter {
 		});
 	}
 
+	private routingTable: {
+		[eventName: string]:
+			[typeGuard: (requestData: any) => boolean,
+			serverFunction: (socket: Socket, requestData: any, callback: Callback) => Promise<void>]
+	} = {
+		// eventName, type guard, function
+		'login': [isLoginEvent, this.login],
+		'register': [isRegisterEvent, this.register],
+		'createGame': [isCreateGameEvent, this.createGame],
+		'listenGameList': [isListenGameListEvent, this.listenGameList],
+	}
+
 	private async login(socket: Socket, requestData: LoginEvent, callback: Callback): Promise<void> {
 		try {
 			let account = await this.authenticator.login(requestData.displayName, requestData.password);
@@ -163,6 +93,37 @@ export class SocketRouter {
 				throw e;
 			}
 		}
+	}
+
+	private async register(socket: Socket, requestData: RegisterEvent, callback: Callback): Promise<void> {
+		// call authenticator
+		let account = await this.authenticator.register(requestData.displayName, requestData.password, requestData.email);
+		// store account in socket data
+		socket.data.account = account;
+		callback({ success: true, message: "Registered" }, { displayName: account.displayName });
+	}
+
+	private async createGame(socket: Socket, requestData: CreateGameEvent, callback: Callback): Promise<void> {
+		// must be logged in
+		if (!socket.data.account) {
+			callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
+			return;
+		}
+
+		let gameSettings: GameSettings = {
+			boardSizeX: 15,
+			boardSizeY: 15,
+			type: requestData.gameType
+		}
+
+		// call app
+		let gameData = await this.app.startGame(gameSettings);
+		callback({ success: true, message: "Started game" });
+	}
+
+	private async listenGameList(socket: Socket, requestData: any, callback: Callback): Promise<void> {
+		socket.join('gameList'); // join room
+		callback({ success: true, message: "Listening to gameList changes" });
 	}
 
 	/**
@@ -232,4 +193,25 @@ type LoginEvent = {
 }
 function isLoginEvent(obj: any): obj is LoginEvent {
 	return obj.displayName && obj.password;
+}
+
+type RegisterEvent = {
+	displayName: string,
+	password: string,
+	email: string
+}
+function isRegisterEvent(obj: any): obj is RegisterEvent {
+	return typeof obj.displayName === 'string' && typeof obj.password === 'string' && typeof obj.email === 'string';
+}
+
+type CreateGameEvent = {
+	gameType: string
+}
+function isCreateGameEvent(obj: any): obj is CreateGameEvent {
+	return typeof obj.gameType === 'string';
+}
+
+type ListenGameListEvent = {}
+function isListenGameListEvent(obj: any): obj is ListenGameListEvent {
+	return typeof obj === 'object';
 }
