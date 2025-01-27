@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Game, PrismaClient } from "@prisma/client";
 
 /**
  * Handles all game logic. Connects to Prisma DB. Returns data in types specified below.
@@ -7,6 +7,18 @@ import { PrismaClient } from "@prisma/client";
  * Does not care who the players actually are. Only works with IDs.
  */
 export class GameServer {
+	public static getPresetSettings(type: string): GameSettings {
+		if (type === 'gomoku') {
+			return {
+				boardSizeX: 19,
+				boardSizeY: 19,
+				type: 'gomoku'
+			}
+		} else {
+			throw new Error("Unknown game type: " + type);
+		}
+	}
+
 	public constructor(
 		private prisma: PrismaClient,
 	) {
@@ -63,6 +75,34 @@ export class GameServer {
 				}
 			}
 		});
+	}
+
+	public async getGameList(): Promise<Game[]> {
+		return this.prisma.game.findMany();
+	}
+
+	public readonly gameListListener = new Listener<Game[]>(this.getGameList);
+	public readonly gameListeners = new Map<string, Listener<GameData>>();
+}
+
+class Listener<T> {
+	public constructor(
+		private dataFetchingFunction: () => Promise<T>
+	) {}
+
+	private callbacks: ((data: T) => void)[] = [];
+
+	public notify(): void {
+		// fetch data and send to all
+		this.dataFetchingFunction().then(data => {
+			for (let callback of this.callbacks) callback(data);
+		});
+	}
+
+	public add(callback: (data: T) => void): void {
+		// register callback and send him data
+		this.callbacks.push(callback);
+		this.dataFetchingFunction().then(data => callback(data));
 	}
 }
 

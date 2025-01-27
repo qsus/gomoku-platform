@@ -4,7 +4,6 @@
 // - optional result from that function will be returned alongside a mandatory status object
 
 import { Server, Socket } from "socket.io";
-import { SocketIoProvider } from "./SocketIoProvider";
 import { ErrorType, Status } from "./Transport/Status";
 import { GameServer, GameSettings } from "./GameServer";
 import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
@@ -27,178 +26,138 @@ export class SocketRouter {
 				console.log('user disconnected');
 			});
 
-			socket.on('login', (requestData: { displayName: string, password: string }, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent a login event without callback");
-					return;
-				}
-				// verify parameter types (typeof can detect undefined)
-				if (typeof requestData.displayName !== 'string' || typeof requestData.password !== 'string') {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-					return;
-				}
+			socket.on('test', this.withStructureCheck(this.withErrorHandling((requestData: object, callback: Callback): void => {
+				throw new Error("experiment");
+				//callback({ success: true, message: requestData.message });
+			})));
 
-				// call authenticator
-				this.authenticator.login(requestData.displayName, requestData.password).then((account: Account | false) => {
-					if (account === false) {
-						callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
-						return;
-					}
-					
+			socket.on('login', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback): Promise<void> => {
+				// verify request format
+				if (!isLoginRequest(requestData)) throw new Error("Invalid request format");
+
+				try {
+					// call authenticator
+					let account = await this.authenticator.login(requestData.displayName, requestData.password);
 					socket.data.account = account;
 					callback({ success: true, message: "Logged in" }, { displayName: account.displayName });
-				}).catch((e) => {
+				} catch (e) {
+					// possible authenticator errors
 					if (e instanceof InvalidPasswordError) {
 						callback({ success: false, error: ErrorType.Other, message: "Invalid credentials" });
 					} else if (e instanceof AccountNotFoundError) {
 						callback({ success: false, error: ErrorType.Other, message: "Account not found" });
 					} else {
-						callback({ success: false, error: ErrorType.Other, message: "Failed to login, unknown error\n" + e });
+						throw e;
 					}
-				});
-				
-			});
+				}
+			})));
 
-			socket.on('register', (requestData: { displayName: string, password: string, email: string }, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent a register event without callback");
-					return;
-				}
-				// verify parameter types (typeof can detect undefined)
-				if (typeof requestData.displayName !== 'string' || typeof requestData.password !== 'string' || typeof requestData.email !== 'string') {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-					return;
-				}
+			socket.on('register', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback): Promise<void> => {
+				// verify request format
+				if (!isRegisterRequest(requestData)) throw new Error("Invalid request format");
 
 				// call authenticator
-				this.authenticator.register(requestData.displayName, requestData.password, requestData.email).then((account: Account) => {
+				try {
+					let account = await this.authenticator.register(requestData.displayName, requestData.password, requestData.email);
 					socket.data.account = account;
 					callback({ success: true, message: "Registered" }, { displayName: account.displayName });
-				}).catch((e) => {
-					callback({ success: false, error: ErrorType.Other, message: "Failed to register" });
-				})
-			});
-
-			socket.on('unregister', (requestData: {}, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent an unregister event without callback");
+				} catch (e) {
+					callback({ success: false, error: ErrorType.Other, message: "Failed to register, most likely account already exists." });
 					return;
 				}
+			})));
 
+			socket.on('unregister', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				// make sure that user is logged in
 				if (!socket.data.account) {
 					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
 					return;
 				}
 
 				// call authenticator
-				this.authenticator.unregister(socket.data.account.userId).then(() => {
+				try {
+					await this.authenticator.unregister(socket.data.account.userId);
 					callback({ success: true, message: "Unregistered" });
-				}).catch((err: Error) => {
+				} catch (e) {
 					callback({ success: false, error: ErrorType.Other, message: "Failed to unregister" });
-				})
-			});
-
-			socket.on('createGame', (requestData: { gameType: string }, callback: Callback) => {
-				// verify callback type
-				if (typeof callback !== 'function') {
-					console.warn("User sent a startGame event without callback");
 					return;
 				}
-				// verify parameter types (typeof can detect undefined)
-				if (typeof requestData.gameType !== 'string') {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "Invalid request format" });
-					return;
-				}
+			})));
 
+			socket.on('createGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				// make sure that user is logged in
 				if (!socket.data.account) {
 					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
 					return;
 				}
 
-				let gameSettings: GameSettings = {
-					boardSizeX: 15,
-					boardSizeY: 15,
-					type: requestData.gameType
+				// start game
+				let gameSettings = GameServer.getPresetSettings('gomoku');
+				try {
+					let game = await this.app.startGame(gameSettings);
+					callback({ success: true, message: "Started game" }, game);
+				} catch (e) {
+					callback({ success: false, error: ErrorType.Other, message: "Failed to start game" });
+					return;
 				}
-				// call app
-				this.app.startGame(gameSettings).then(( game: any ) => {
-					callback({ success: true, message: "Started game" });
-					socket.emit('alert', { message: game });
-				}).catch((err: Error) => {
-					callback({ success: false, error: ErrorType.Other, message: "Failed to start game\n" + err });
-				})
-				
-			})
+			})));
 
-			// default handler for unknown events; TODO: could allow override using this.setDefaultEvent
-			socket.onAny((event: string, requestData: any[], callback: Callback) => {
-				if (!socket.listeners(event).length) {
-					try {
-						callback({ success: false, error: ErrorType.Other, message: "No handler for event: " + event });
-						console.warn("User sent an unknown event: " + event);
-					} catch (e) { // TODO: more precise error handling
-						console.warn("User sent an unknown event and without callback. Event name: " + event);
-					}
+			socket.on('listenGameList', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				socket.join('gameList');
+				callback({ success: true, message: "Listening to game list" });
+			})));
+
+			socket.onAny((eventName, ...args) => {
+				// if handler exists, do nothing
+				if (socket.listenerCount(eventName) > 0) return;
+
+				// no handler exists, log
+				console.log("Unknown event: " + eventName);
+
+				// try at least telling the user if he provided a callback
+				if (typeof args[args.length - 1] === 'function') {
+					args[args.length - 1]({ success: false, error: ErrorType.Other, message: "Unknown event: " + eventName });
 				}
 			});
 		});
 	}
 
-	/**
-	 * Register function which socket.io clients can "call". This essentially emulates
-	 * the traditional way where client can call an API endpoint and the enpoint responds.
-	 * @param eventName Name of the event to be listened to
-	 * @param serverFunction Function to be "called"
-	 */
-	private addEvent(eventName: string, serverFunction: ServerFunction) {
-		// register a "middleware" - a function which will be called for all sockets
-		this.io.use((socket: Socket, next): void => {
-			// register the event name
-			socket.on(eventName, async (...requestArgs: [...any[], Callback]) => {
-				// extract the callback
-				const callback: Callback = requestArgs.pop();
-				if (typeof callback !== 'function') {
-					console.warn("User sent an event without callback. Event name: " + eventName + ", args: " + requestArgs);
-					return;
+	private withErrorHandling(serverFunction: ServerFunction): ServerFunction {
+		return async (data, callback) => { // types are derived from return type
+			try {
+				return await serverFunction(data, callback);
+			} catch (e) {
+				console.log("Error in server function: " + e);
+				if (e instanceof NotAuthenticatedErrorExample) {
+					callback({ success: false, error: ErrorType.NotAuthenticated, message: e.message });
+				} else {
+					callback({ success: false, error: ErrorType.Other, message: e.message });
 				}
-				
-				// to be sent to the client
-				let status: Status;
-				let result: any;
-		
-				try {
-					console.log("Event: " + eventName + ", args: " + requestArgs);
-					result = await serverFunction(...requestArgs);
-					status = { success: true };
-				} catch (e) {
-					// detect error type
-					if (e instanceof NotAuthenticatedErrorExample) {
-						status = { success: false, error: ErrorType.NotAuthenticated, message: e.message };
-					} else { // bunch of another else ifs such as incorrect arguments
-						// unknown server-side error, please report to administrator
-						// TODO: hide server error from client
-						status = { success: false, error: ErrorType.Other, message: "Unhandled server error: " + e.message };
-					}
-				}
-		
-				callback(status, result);
-			});
+			}
+		}
+	}
 
-			// excluding this would make this the only handler
-			next();
-		});
+	private withStructureCheck(serverFunction: ServerFunction): ServerFunction {
+		return async (data, callback) => { // types are derived from return type
+			if (typeof callback !== 'function') {
+				console.warn("User sent an event without callback. Event not executed.");
+				return;
+			}
+
+			if (typeof data !== 'object') {
+				callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "First argument must be an object" });
+				return;
+			}
+
+			return await serverFunction(data, callback);
+		}
 	}
 }
 
 /**
  * Function called when event is recieved
- * @param receivedArgs Arguments received from event
- * @returns Arguments returned to client
  */
-type ServerFunction = (...receivedArgs: any[]) => any;
+type ServerFunction = (data: object, callback: Callback) => any;
 
 /**
  * Socket.io callback.
@@ -211,4 +170,21 @@ class NotAuthenticatedErrorExample extends Error {
 		super(message);
 		this.name = "CustomError";
 	}
+}
+
+type LoginRequest = {
+	displayName: string,
+	password: string
+}
+function isLoginRequest(data: any): data is LoginRequest {
+	return typeof data.displayName === 'string' && typeof data.password === 'string';
+}
+
+type RegisterRequest = {
+	displayName: string,
+	password: string,
+	email: string
+}
+function isRegisterRequest(data: any): data is RegisterRequest {
+	return typeof data.displayName === 'string' && typeof data.password === 'string' && typeof data.email === 'string';
 }
