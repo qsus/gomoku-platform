@@ -12,7 +12,7 @@
 				return;
 			}
 	
-			goto(`/game/${gameId}`);
+			//goto(`/game/${gameId}`);
 		});
 	}}>Create game</button>
 </div>
@@ -27,6 +27,12 @@
 
 	onMount(() => {
 		// TODO optional: ask for game list
+		socket.emit('listenGameList', {}, (status: Status): void => {
+			if (!status.success) {
+				alert(status.message);
+				return;
+			}
+		});
 
 		socket.on('gameList', (gameIdsRcv: string[]) => {
 			gameIds = gameIdsRcv;

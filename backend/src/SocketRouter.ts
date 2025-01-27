@@ -110,6 +110,7 @@ export class SocketRouter {
 
 			socket.on('listenGameList', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
 				socket.join('gameList');
+				this.notifyGameList(); // notifies user immediately; TODO: notify only this user
 				callback({ success: true, message: "Listening to game list" });
 			})));
 
