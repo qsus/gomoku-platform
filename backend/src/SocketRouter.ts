@@ -6,7 +6,8 @@
 import { Server, Socket } from "socket.io";
 import { ErrorType, Status } from "./Transport/Status";
 import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Account } from "@prisma/client";
+import { GameStatusBroadcast as GameStatusBroadcast } from "./Transport/GameStatusBroadcast";
 
 /**
  * Provides websocket API for clients.
@@ -31,9 +32,13 @@ export class SocketRouter {
 			})));
 
 			socket.on('login', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback): Promise<void> => {
-				// verify request format
-				if (!isLoginRequest(requestData)) throw new Error("Invalid request format");
-
+				if ( // verify request format
+					!("displayName" in requestData) || typeof requestData.displayName !== 'string' ||
+					!("password" in requestData) || typeof requestData.password !== 'string'
+				) {
+					throw new Error("Invalid request format (missing displayName or password)");
+				}
+				
 				try {
 					// call authenticator
 					let account = await this.authenticator.login(requestData.displayName, requestData.password);
@@ -52,9 +57,14 @@ export class SocketRouter {
 			})));
 
 			socket.on('register', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback): Promise<void> => {
-				// verify request format
-				if (!isRegisterRequest(requestData)) throw new Error("Invalid request format");
-
+				if ( // verify request format
+					!("displayName" in requestData) || typeof requestData.displayName !== 'string' ||
+					!("password" in requestData) || typeof requestData.password !== 'string' ||
+					!("email" in requestData) || typeof requestData.email !== 'string'
+				) {
+					throw new Error("Invalid request format (missing displayName or password)");
+				}
+				
 				// call authenticator
 				try {
 					let account = await this.authenticator.register(requestData.displayName, requestData.password, requestData.email);
@@ -96,11 +106,39 @@ export class SocketRouter {
 				board[0][0] = 'b'; // example
 				board[0][1] = 'w'; // example
 		
+				let gameState: GameState = { // example
+					moves: [
+						{
+							stones: [
+								{
+									x: 0,
+									y: 0,
+									color: 1
+								},
+								{
+									x: 0,
+									y: 1,
+									color: 1
+								}
+							],
+							pressClock: false
+						},
+						{
+							stones: [
+								{
+									x: 1,
+									y: 0,
+									color: 2
+								}
+							],
+							pressClock: true
+						}
+					]
+				};
+
 				let game = await this.prisma.game.create({
 					data: {
-						gameState: {
-							board: board
-						}
+						gameState: gameState,
 					}
 				})
 				this.notifyGameList();
@@ -115,11 +153,116 @@ export class SocketRouter {
 			})));
 
 			socket.on('listenGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
-				// verify request format
-				if (!isListenGameRequest(requestData)) throw new Error("Invalid request format");
+				if ( // verify request format
+					!("gameId" in requestData) || typeof requestData.gameId !== 'string'
+				) {
+					throw new Error("Invalid request format (missing gameId)");
+				}
 				
 				socket.join("game:" + requestData.gameId);
 				callback({ success: true, message: "Listening to game" });
+				this.notifyGameStatus(requestData.gameId); // notifies user immediately; TODO: notify only this user
+			})));
+
+			socket.on('playMove', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				if ( // verify request format
+					!("gameId" in requestData) || typeof requestData.gameId !== 'string' ||
+					!("move" in requestData) || typeof requestData.move !== 'object' ||
+					!("stones" in requestData.move!) || !Array.isArray(requestData.move.stones) ||
+					!("pressClock" in requestData.move!) || typeof requestData.move.pressClock !== 'boolean' ||
+					// for all stones
+					requestData.move.stones.some((stone: any) => {
+						return typeof stone !== 'object' || typeof stone.x !== 'number' || typeof stone.y !== 'number' || typeof stone.color !== 'number';
+					})
+				) {
+					throw new Error("Invalid request format (missing gameId or move)");
+				}
+
+				// check if user is authenticated
+				if (!socket.data.account) {
+					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
+					return;
+				}
+
+				// load game
+				let game = await this.prisma.game.findUnique({ where: { id: requestData.gameId } });
+				if (!game) {
+					callback({ success: false, error: ErrorType.Other, message: "Game not found" });
+					return;
+				}
+				let gameState = game.gameState as GameState;
+				
+				let move: GameState['moves'][0] = {
+					stones: [],
+					pressClock: requestData.move.pressClock
+				};
+
+				for (let stone of requestData.move.stones) {
+					move.stones.push({
+						x: stone.x,
+						y: stone.y,
+						color: stone.color
+					});
+				}
+
+				console.log(move);
+				gameState.moves.push(move);
+				await this.prisma.game.update({
+					where: { id: requestData.gameId },
+					data: {
+						gameState: gameState
+					}
+				});
+
+				callback({ success: true, message: "Played move" });
+				this.notifyGameStatus(requestData.gameId);
+			})));
+
+			socket.on('joinGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				if ( // verify request format
+					!("gameId" in requestData) || typeof requestData.gameId !== 'string'
+				) {
+					throw new Error("Invalid request format (missing gameId)");
+				}
+
+				// load game
+				let game = await this.prisma.game.findUnique({ 
+					where: { id: requestData.gameId },
+					include: { players: true }
+				});
+				if (!game) {
+					callback({ success: false, error: ErrorType.Other, message: "Game not found" });
+					return;
+				}
+				
+				// find player
+				let account: Account = socket.data.account; // prisma account
+				if (!account) {
+					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
+					return;
+				}
+				
+				// check if player is already in game
+				if (game.players.some(player => player.id === account.id)) {
+					callback({ success: false, error: ErrorType.Other, message: "Player already in game" });
+					return;
+				}
+
+				// add player to game
+				await this.prisma.game.update({
+					where: { id: requestData.gameId },
+					data: {
+						players: {
+							connect: {
+								id: account.id
+							}
+						}
+					}
+				});
+
+				callback({ success: true, message: "Joined game" });
+				this.notifyGameStatus(requestData.gameId);
+
 			})));
 
 			socket.onAny((eventName, ...args) => {
@@ -176,8 +319,41 @@ export class SocketRouter {
 
 	private async notifyGameStatus(gameId: string) {
 		// TODO
-		let game = await this.prisma.game.findUnique({ where: { id: gameId } });
-		this.io.to(gameId).emit('gameStatus', game?.gameState);
+		let game = await this.prisma.game.findUnique({ 
+			where: { id: gameId },
+			include: { players: true }
+		});
+		if (!game) return; // TODO: error handling
+
+		let gameStatus = game.gameState as GameState;
+		let board: number[][] = SocketRouter.movesToBoard(gameStatus.moves);
+		
+		let gameStatusBroadcast: GameStatusBroadcast = {
+			gameId: gameId,
+			players: game.players.map(player => player.displayName),
+			board: board
+		};
+		this.io.to('game:' + gameId).emit('gameStatus', gameStatusBroadcast);
+	}
+
+	public static movesToBoard(moves: {
+		stones: {
+			x: number;
+			y: number;
+			color: number; // 0 = empty, 1 = black, 2 = white
+		}[],
+		pressClock: boolean;
+	}[]): number[][] {
+		// TODO: not assume 15x15
+		let board = Array.from({ length: 15 }, () => Array(15).fill(0));
+
+		for (let move of moves) {
+			for (let stone of move.stones) {
+				board[stone.y][stone.x] = stone.color;
+			}
+		}
+
+		return board;
 	}
 }
 
@@ -199,26 +375,13 @@ class NotAuthenticatedErrorExample extends Error {
 	}
 }
 
-type LoginRequest = {
-	displayName: string,
-	password: string
-}
-function isLoginRequest(data: any): data is LoginRequest {
-	return typeof data.displayName === 'string' && typeof data.password === 'string';
-}
-
-type RegisterRequest = {
-	displayName: string,
-	password: string,
-	email: string
-}
-function isRegisterRequest(data: any): data is RegisterRequest {
-	return typeof data.displayName === 'string' && typeof data.password === 'string' && typeof data.email === 'string';
-}
-
-type ListenGameRequest = {
-	gameId: string
-}
-function isListenGameRequest(data: any): data is ListenGameRequest {
-	return typeof data.gameId === 'string';
+type GameState = {
+	moves: {
+		stones: {
+			x: number,
+			y: number,
+			color: number // 0 = empty, 1 = black, 2 = white
+		}[],
+		pressClock: boolean
+	}[]
 }
