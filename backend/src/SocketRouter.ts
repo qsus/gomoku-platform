@@ -7,7 +7,6 @@ import { Server, Socket } from "socket.io";
 import { ErrorType, Status } from "./Transport/Status";
 import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
 import { PrismaClient } from "@prisma/client";
-import { GameStatus } from "./Transport/GameStatus";
 
 /**
  * Provides websocket API for clients.
@@ -84,52 +83,6 @@ export class SocketRouter {
 				}
 			})));
 
-			socket.on('joinGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
-				// verify request format
-				if (!isJoinGameRequest(requestData)) throw new Error("Invalid request format");
-
-				// make sure that user is logged in
-				if (!socket.data.account) {
-					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
-					return;
-				}
-
-				let gameId = requestData.gameId;
-				let userId = socket.data.account.userId;
-
-				// find game
-				let game = await this.prisma.game.findUnique({
-					where: {
-						id: gameId
-					},
-					include: {
-						players: true
-					}
-				})
-		
-				// check if game exists and not full
-				if (!game) throw new Error("Game not found: " + gameId);
-				if (game.players.length >= 2) throw new Error("Game is full: " + gameId);
-		
-				// add player
-				this.prisma.game.update({
-					where: {
-						id: gameId
-					},
-					data: {
-						players: {
-							connect: {
-								id: userId
-							}
-						}
-					}
-				});
-				// notify all players
-				this.notifyGameStatus(gameId);
-
-				callback({ success: true, message: "Joined game" });
-			})));
-
 			socket.on('createGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
 				// make sure that user is logged in
 				if (!socket.data.account) {
@@ -166,7 +119,6 @@ export class SocketRouter {
 				if (!isListenGameRequest(requestData)) throw new Error("Invalid request format");
 				
 				socket.join("game:" + requestData.gameId);
-				this.notifyGameStatus(requestData.gameId); // notifies user immediately; TODO: notify only this user
 				callback({ success: true, message: "Listening to game" });
 			})));
 
@@ -223,22 +175,9 @@ export class SocketRouter {
 	}
 
 	private async notifyGameStatus(gameId: string) {
-		let game = await this.prisma.game.findUnique({
-			where: { id: gameId },
-			include: {
-				players: true
-			}
-		});
-		if (!game) return; // TODO
-
-		let gameState: GameState = game.gameState as GameState; // TODO checking
-
-		let response: GameStatus = {
-			gameId: gameId,
-			board: gameState.board,
-			players: game.players.map(player => player.displayName)
-		}
-		this.io.to("game:" + gameId).emit('gameStatus', response);
+		// TODO
+		let game = await this.prisma.game.findUnique({ where: { id: gameId } });
+		this.io.to(gameId).emit('gameStatus', game?.gameState);
 	}
 }
 
@@ -282,17 +221,4 @@ type ListenGameRequest = {
 }
 function isListenGameRequest(data: any): data is ListenGameRequest {
 	return typeof data.gameId === 'string';
-}
-
-type JoinGameRequest = {
-	gameId: string
-}
-function isJoinGameRequest(data: any): data is JoinGameRequest {
-	return typeof data.gameId === 'string';
-}
-
-
-
-type GameState = {
-	board: string[][]
 }
