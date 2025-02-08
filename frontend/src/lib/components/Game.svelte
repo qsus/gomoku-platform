@@ -2,18 +2,24 @@
 	<p>Game id: {gameId}</p>
 	
 	<div id="game">
+		<h2>Players</h2>
+		<ul>
+			{#each players as player}
+				<li>{player}</li>
+			{/each}
+		</ul>
 		<table>
 			<thead>
 				<tr>
 					<th></th>
-					{#each Array(gameState?.board.stones.length).fill(0).map((_, i) => String.fromCharCode(65 + i)) as x}
+					{#each Array(board.length).fill(0).map((_, i) => String.fromCharCode(65 + i)) as x}
 						<th>{x}</th>
 					{/each}
 				</tr>
 			</thead>
 			<tbody>
-				{#if gameState}
-					{#each gameState.board.stones as row, y}
+				{#if board}
+					{#each board as row, y}
 						<tr>
 							<th>{y + 1}</th>
 							{#each row as cell, x}
@@ -72,23 +78,25 @@
 
 <script lang="ts">
     import { page } from '$app/stores';
-    import type { GameState } from '$lib/Transport/GameState';
-    import { Color } from '$lib/Transport/Misc';
-    import { MoveType, type Move } from '$lib/Transport/Move';
+    import { isGameStatus, type GameStatus } from '$lib/Transport/GameStatus';
+    //import { MoveType, type Move } from '$lib/Transport/Move';
     import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
 	
 	export let socket: SocketIOClient.Socket;
 	export let gameId: string;
-	let gameState: GameState;
+	let gameStatus: GameStatus; // This is incorrect
 	let xInput: number;
 	let yInput: number;
+
+	let board: string[][];
+	let players: string[];
 	
 	function playMove(x: number, y: number) {
-		let move: Move = {
+		/*let move: Move = {
 			moveType: MoveType.PlaceStone,
 			stoneChanges: [
-				{ x: x, y: y, color: Color.Black }
+				{ x: x, y: y, color: "b" }
 			]
 		}
 		socket.emit('playMove', $page.params.gameId, move, (status: Status) => {
@@ -96,19 +104,28 @@
 				alert(status.message);
 				return;
 			}
-		});
+		});*/
 	}
 
 	onMount(() => {
-		socket.on('gameState', (state: GameState) => {
-			gameState = state;
-			console.log(state);
+		console.log('Game component mounted');
+		socket.on('gameStatus', (data: any) => {
+			if (!isGameStatus(data)) {
+				console.error('Invalid game status data', data);
+				return;
+			}
+			
+			if (data.gameId !== $page.params.gameId) return;
+			
+			board = data.board;
+			players = data.players;
 		});
 
-		socket.emit('joinGame', $page.params.gameId, (status: Status) => {
+		socket.emit('listenGame', { gameId: $page.params.gameId }, (status: Status) => {
 			if (!status.success) {
 				alert(status.message);
 			}
 		});
 	});
 </script>
+
