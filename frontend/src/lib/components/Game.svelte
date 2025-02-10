@@ -27,8 +27,10 @@
 											<img src="/icons/default/one.png" alt="black stone">
 										{:else if cell === 2}
 											<img src="/icons/default/two.png" alt="white stone">
+										{:else if cell === 0}
+											<!-- empty -->
 										{:else}
-											{cell}
+											{"Unexpected value " + cell}
 										{/if}
 									</td>
 								{/each}
