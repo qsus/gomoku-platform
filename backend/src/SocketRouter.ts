@@ -43,7 +43,7 @@ export class SocketRouter {
 					// call authenticator
 					let account = await this.authenticator.login(requestData.displayName, requestData.password);
 					socket.data.account = account;
-					callback({ success: true, message: "Logged in" }, { displayName: account.displayName });
+					callback({ success: true, message: "Logged in" }, { displayName: account.displayName, id: account.id });
 				} catch (e) {
 					// possible authenticator errors
 					if (e instanceof InvalidPasswordError) {
@@ -69,7 +69,7 @@ export class SocketRouter {
 				try {
 					let account = await this.authenticator.register(requestData.displayName, requestData.password, requestData.email);
 					socket.data.account = account;
-					callback({ success: true, message: "Registered" }, { displayName: account.displayName });
+					callback({ success: true, message: "Registered" }, { displayName: account.displayName, id: account.id });
 				} catch (e) {
 					callback({ success: false, error: ErrorType.Other, message: "Failed to register, most likely account already exists." });
 					return;
@@ -311,13 +311,13 @@ export class SocketRouter {
 		}
 	}
 
-	private async notifyGameList() {
+	private async notifyGameList(): Promise<void> {
 		let games = await this.prisma.game.findMany();
 		let response = games.map(game => game.id);
 		this.io.to('gameList').emit('gameList', response);
 	}
 
-	private async notifyGameStatus(gameId: string) {
+	private async notifyGameStatus(gameId: string): Promise<void> {
 		// TODO
 		let game = await this.prisma.game.findUnique({ 
 			where: { id: gameId },
@@ -330,8 +330,12 @@ export class SocketRouter {
 		
 		let gameStatusBroadcast: GameStatusBroadcast = {
 			gameId: gameId,
-			players: game.players.map(player => player.displayName),
-			board: board
+			players: game.players.map(player => player.id),
+			board: board,
+			nextTurn: {
+				player: 0,
+				stone: 2
+			}
 		};
 		this.io.to('game:' + gameId).emit('gameStatus', gameStatusBroadcast);
 	}

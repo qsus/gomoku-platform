@@ -49,8 +49,6 @@
 	{/if}
 </div>
 
-
-
 <style>
 	#game table {
 		border-collapse: collapse;
@@ -74,6 +72,7 @@
 	import type { GameStatusBroadcast } from '$lib/Transport/GameStatusBroadcast';
 	import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
+	import { userData } from '$lib/stores/userData';
 	
 	// constants
 	export let socket: SocketIOClient.Socket;
@@ -84,8 +83,23 @@
 
 	function positionClick(x: number, y: number) {
 		// for now assume playing simple moves
+		if (!gameState.nextTurn) {
+			alert('Game is not in progress');
+			return;
+		}
+
+		if (!$userData) {
+			alert('Not logged in');
+			return;
+		}
+
+		if (gameState.players[gameState.nextTurn.player] !== $userData.id) {
+			alert('Not your turn');
+			return;
+		}
+
 		let move = {
-			stones: [{ x: x, y: y, color: 1 }],
+			stones: [{ x: x, y: y, color: gameState.nextTurn.stone }],
 			pressClock: true
 		};
 		socket.emit('playMove', { gameId: $page.params.gameId, move: move }, (status: Status) => {
