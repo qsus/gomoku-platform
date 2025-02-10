@@ -73,9 +73,11 @@
 	import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
 	import { userData } from '$lib/stores/userData';
+	import type { Writable } from 'svelte/store';
+	import { getSocket } from '$lib/stores/socket';
 	
 	// constants
-	export let socket: SocketIOClient.Socket;
+	export let socket: Writable<SocketIOClient.Socket | null>;
 	export let gameId: string;
 
 	// game status
@@ -102,7 +104,13 @@
 			stones: [{ x: x, y: y, color: gameState.nextTurn.stone }],
 			pressClock: true
 		};
-		socket.emit('playMove', { gameId: $page.params.gameId, move: move }, (status: Status) => {
+
+		if (!$socket) {
+			alert('Socket not connected');
+			return;
+		}
+
+		$socket.emit('playMove', { gameId: $page.params.gameId, move: move }, (status: Status) => {
 			if (!status.success) {
 				alert(status.message);
 			}
@@ -111,23 +119,37 @@
 	}
 
 	function joinGame() {
-		socket.emit('joinGame', { gameId: $page.params.gameId }, (status: Status) => {
+		if (!$socket) {
+			alert('Socket not connected');
+			return;
+		}
+		$socket.emit('joinGame', { gameId: $page.params.gameId }, (status: Status) => {
 			if (!status.success) {
 				alert(status.message);
 			}
 		});
 	}
 
-	onMount(() => {
-		socket.on('gameStatus', (state: GameStatusBroadcast) => {
-			gameState = state;
-			console.log(gameState);
-		});
+	let currentSocket: SocketIOClient.Socket | null = null;
+	$: {
+		console.log($socket !== currentSocket);
+		if ($socket && $socket !== currentSocket) {
+			currentSocket = $socket;
 
-		socket.emit('listenGame', { gameId: $page.params.gameId }, (status: Status) => {
-			if (!status.success) {
-				alert(status.message);
-			}
-		});
+			$socket.on('gameStatus', (state: GameStatusBroadcast) => {
+				gameState = state;
+				console.log(gameState);
+			});
+			
+			$socket.emit('listenGame', { gameId: $page.params.gameId }, (status: Status) => {
+				if (!status.success) {
+					alert(status.message);
+				}
+			});
+		}
+	}
+
+	onMount(() => {
+		getSocket();
 	});
 </script>

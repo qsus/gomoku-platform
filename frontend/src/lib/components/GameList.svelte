@@ -6,7 +6,12 @@
 		{/each}
 	</ul>
 	<button on:click={() => {
-		socket.emit('createGame', { gameType: "gomoku" }, (status: Status, gameId?: string): void => {
+		if (!$socket) {
+			alert('Socket not connected');
+			return;
+		}
+
+		$socket.emit('createGame', { gameType: "gomoku" }, (status: Status, gameId?: string): void => {
 			if (!status.success) {
 				alert(status.message);
 				return;
@@ -18,24 +23,31 @@
 </div>
 
 <script lang="ts">
-    import { goto } from '$app/navigation';
-    import type { Status } from '$lib/Transport/Status';
+	import { goto } from '$app/navigation';
+	import { getSocket } from '$lib/stores/socket';
+	import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
+	import type { Writable } from 'svelte/store';
 
-	export let socket: SocketIOClient.Socket;
+	export let socket: Writable<SocketIOClient.Socket | null>;
 	let gameIds: string[] = [];
 
-	onMount(() => {
-		// TODO optional: ask for game list
-		socket.emit('listenGameList', {}, (status: Status): void => {
-			if (!status.success) {
-				alert(status.message);
-				return;
-			}
-		});
+	$: {
+		if ($socket) {
+			$socket.emit('listenGameList', {}, (status: Status): void => {
+				if (!status.success) {
+					alert(status.message);
+					return;
+				}
+			});
+		
+			$socket.on('gameList', (gameIdsRcv: string[]) => {
+				gameIds = gameIdsRcv;
+			});
+		}
+	}
 
-		socket.on('gameList', (gameIdsRcv: string[]) => {
-			gameIds = gameIdsRcv;
-		});
+	onMount(() => {
+		getSocket();
 	});
 </script>

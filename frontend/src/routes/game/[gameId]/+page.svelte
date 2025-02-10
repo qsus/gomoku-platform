@@ -8,14 +8,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import { onMount } from 'svelte';
-    import { getSocket } from '$lib/stores/socket';
+    import { socketStore as socket } from '$lib/stores/socket';
     import Game from '$lib/components/Game.svelte';
     import LoginForm from '$lib/components/LoginForm.svelte';
 
-	let socket: SocketIOClient.Socket;
-
 	onMount(() => {
-		socket = getSocket();
+
 	});
 </script>
+
 
