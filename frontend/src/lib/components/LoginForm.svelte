@@ -4,11 +4,7 @@
 		<span>{#if $userData}Logged in as: {$userData.displayName}{:else}Not logged in{/if}</span>
 	</fieldset>
 	<form on:submit|preventDefault={() => {
-		if (!$socket) {
-			alert('Socket not connected');
-			return;
-		}
-		$socket.emit('login', { displayName: displayName, password: password}, (status: Status, data: any) => {
+		socket.emit('login', { displayName: displayName, password: password}, (status: Status, data: any) => {
 			if (!status.success) {
 				alert(status.message);
 				return;
@@ -26,11 +22,7 @@
 		</fieldset>
 	</form>
 	<form on:submit|preventDefault={() => {
-		if (!$socket) {
-			alert('Socket not connected');
-			return;
-		}
-		$socket.emit('register', { displayName: displayName, email: email, password: password}, (status: Status, data: any) => {
+		socket.emit('register', { displayName: displayName, email: email, password: password}, (status: Status, data: any) => {
 			if (!status.success) {
 				alert(status.message);
 				return;
@@ -54,27 +46,17 @@
 	import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
 	import { userData } from '$lib/stores/userData';
-	import type { Writable } from 'svelte/store';
-	import { getSocket } from '$lib/stores/socket';
 
-	export let socket: Writable<SocketIOClient.Socket | null>;
+	export let socket: SocketIOClient.Socket;
 	let displayName: string = '';
 	let password: string = '';
 	let email: string = '';
 
-	let currentSocket: SocketIOClient.Socket | null = null;
-	$: {
-		if ($socket && $socket !== currentSocket) {
-			currentSocket = $socket;
-			
-			$socket.on('userData', (userDataRcv: any) => {
-				$userData = userDataRcv;
-			});
-		}
-	}
 	onMount(() => {
-		getSocket();
-	})
+		socket.on('userData', (userDataRcv: any) => {
+			$userData = userDataRcv;
+		});
+	});
 </script>
 
 

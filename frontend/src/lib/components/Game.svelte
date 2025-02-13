@@ -73,11 +73,9 @@
 	import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
 	import { userData } from '$lib/stores/userData';
-	import type { Writable } from 'svelte/store';
-	import { getSocket } from '$lib/stores/socket';
 	
 	// constants
-	export let socket: Writable<SocketIOClient.Socket | null>;
+	export let socket: SocketIOClient.Socket;
 	export let gameId: string;
 
 	// game status
@@ -105,12 +103,12 @@
 			pressClock: true
 		};
 
-		if (!$socket) {
+		if (!socket) {
 			alert('Socket not connected');
 			return;
 		}
 
-		$socket.emit('playMove', { gameId: $page.params.gameId, move: move }, (status: Status) => {
+		socket.emit('playMove', { gameId: $page.params.gameId, move: move }, (status: Status) => {
 			if (!status.success) {
 				alert(status.message);
 			}
@@ -119,37 +117,27 @@
 	}
 
 	function joinGame() {
-		if (!$socket) {
+		if (!socket) {
 			alert('Socket not connected');
 			return;
 		}
-		$socket.emit('joinGame', { gameId: $page.params.gameId }, (status: Status) => {
+		socket.emit('joinGame', { gameId: $page.params.gameId }, (status: Status) => {
 			if (!status.success) {
 				alert(status.message);
 			}
 		});
 	}
 
-	let currentSocket: SocketIOClient.Socket | null = null;
-	$: {
-		console.log($socket !== currentSocket);
-		if ($socket && $socket !== currentSocket) {
-			currentSocket = $socket;
-
-			$socket.on('gameStatus', (state: GameStatusBroadcast) => {
-				gameState = state;
-				console.log(gameState);
-			});
-			
-			$socket.emit('listenGame', { gameId: $page.params.gameId }, (status: Status) => {
-				if (!status.success) {
-					alert(status.message);
-				}
-			});
-		}
-	}
-
 	onMount(() => {
-		getSocket();
+		socket.on('gameStatus', (state: GameStatusBroadcast) => {
+			gameState = state;
+			console.log(gameState);
+		});
+		
+		socket.emit('listenGame', { gameId: $page.params.gameId }, (status: Status) => {
+			if (!status.success) {
+				alert(status.message);
+			}
+		});
 	});
 </script>
