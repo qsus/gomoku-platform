@@ -1,6 +1,7 @@
 export type GameStatusBroadcast = {
 	gameId: string,
 	players: string[], // ids
+	playerOnTurn: number, // index
 	board: number[][],
 	nextTurn?: {
 		player: number, // index

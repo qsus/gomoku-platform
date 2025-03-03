@@ -2,6 +2,7 @@
 	<p>Game id: {gameId}</p>
 	
 	{#if gameState}
+		<p>Player on turn: {gameState.playerOnTurn}</p>
 		<p>
 			Players: {gameState.players}
 			<button on:click={() => joinGame()}>Join</button>
@@ -88,15 +89,15 @@
 			return;
 		}
 
-		if (!$userData) {
+		/*if (!$userData) {
 			alert('Not logged in');
 			return;
-		}
+		}*/
 
-		if (gameState.players[gameState.nextTurn.player] !== $userData.id) {
+		/*if (gameState.players[gameState.nextTurn.player] !== $userData.id) {
 			alert('Not your turn');
 			return;
-		}
+		}*/
 
 		let move = {
 			stones: [{ x: x, y: y, color: gameState.nextTurn.stone }],

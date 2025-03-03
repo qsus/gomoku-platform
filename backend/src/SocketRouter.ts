@@ -107,6 +107,7 @@ export class SocketRouter {
 				board[0][1] = 'w'; // example
 		
 				let gameState: GameState = { // example
+					playerOnTurn: 0,
 					moves: [
 						{
 							stones: [
@@ -185,18 +186,34 @@ export class SocketRouter {
 				}
 
 				// load game
-				let game = await this.prisma.game.findUnique({ where: { id: requestData.gameId } });
+				let game = await this.prisma.game.findUnique({ 
+					where: { id: requestData.gameId },
+					include: { players: true }
+				});
 				if (!game) {
 					callback({ success: false, error: ErrorType.Other, message: "Game not found" });
 					return;
 				}
 				let gameState = game.gameState as GameState;
+
+				// check if it is the player's turn
+				console.log(game.players, gameState.playerOnTurn);
+				let playerOnTurn = game.players[gameState.playerOnTurn];
+				if (!playerOnTurn) {
+					callback({ success: false, error: ErrorType.Other, message: "The player on turn has not joined yet" });
+					return;
+				}
+				console.log(game.players[gameState.playerOnTurn].id, socket.data.account);
+				if (game.players[gameState.playerOnTurn].id !== socket.data.account.id) {
+					callback({ success: false, error: ErrorType.Other, message: "Not your turn" });
+					return;
+				}
 				
+				// generate GameState move from request
 				let move: GameState['moves'][0] = {
 					stones: [],
 					pressClock: requestData.move.pressClock
 				};
-
 				for (let stone of requestData.move.stones) {
 					move.stones.push({
 						x: stone.x,
@@ -204,9 +221,12 @@ export class SocketRouter {
 						color: stone.color
 					});
 				}
-
 				console.log(move);
+
+				// play move; TODO: check move validity
 				gameState.moves.push(move);
+				// increment playerOnTurn; NOTE: uses list of players to get player count instead of assuming two
+				gameState.playerOnTurn = (gameState.playerOnTurn + 1) % game.players.length;
 				await this.prisma.game.update({
 					where: { id: requestData.gameId },
 					data: {
@@ -331,6 +351,7 @@ export class SocketRouter {
 		let gameStatusBroadcast: GameStatusBroadcast = {
 			gameId: gameId,
 			players: game.players.map(player => player.id),
+			playerOnTurn: gameStatus.playerOnTurn,
 			board: board,
 			nextTurn: {
 				player: 0,
@@ -380,6 +401,8 @@ class NotAuthenticatedErrorExample extends Error {
 }
 
 type GameState = {
+	playerOnTurn: number, // index starting at 0
+	// TODO: gameStarted or gamePhase
 	moves: {
 		stones: {
 			x: number,
