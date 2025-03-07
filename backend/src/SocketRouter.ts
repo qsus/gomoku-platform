@@ -7,7 +7,7 @@ import { Server, Socket } from "socket.io";
 import { ErrorType, Status } from "./Transport/Status";
 import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
 import { PrismaClient, Account } from "@prisma/client";
-import { GameStatusBroadcast as GameStatusBroadcast } from "./Transport/GameStatusBroadcast";
+import { GameStatusBroadcast as GameStatusBroadcast, MoveType } from "./Transport/GameStatusBroadcast";
 
 /**
  * Provides websocket API for clients.
@@ -134,7 +134,8 @@ export class SocketRouter {
 							],
 							pressClock: true
 						}
-					]
+					],
+					gamePhase: GamePhase.Started
 				};
 
 				let game = await this.prisma.game.create({
@@ -348,14 +349,19 @@ export class SocketRouter {
 		let gameStatus = game.gameState as GameState;
 		let board: number[][] = SocketRouter.movesToBoard(gameStatus.moves);
 		
+		// determine next stone color; if no stones, default to 1
+		let lastStone = gameStatus.moves[gameStatus.moves.length - 1].stones[0];
+		let nextColor = lastStone?.color === 1 ? 2 : 1;
+
 		let gameStatusBroadcast: GameStatusBroadcast = {
 			gameId: gameId,
 			players: game.players.map(player => player.id),
-			playerOnTurn: gameStatus.playerOnTurn,
+			//playerOnTurn: gameStatus.playerOnTurn,
 			board: board,
 			nextTurn: {
-				player: 0,
-				stone: 2
+				player: gameStatus.playerOnTurn,
+				stone: nextColor,
+				allowedMoveTypes: [MoveType.placeAndClock, MoveType.placeOnly]
 			}
 		};
 		this.io.to('game:' + gameId).emit('gameStatus', gameStatusBroadcast);
@@ -410,5 +416,21 @@ type GameState = {
 			color: number // 0 = empty, 1 = black, 2 = white
 		}[],
 		pressClock: boolean
-	}[]
+	}[],
+	gamePhase: GamePhase
+}
+
+enum GamePhase {
+	Started, // waiting for swap 1
+
+	PlacedSwap1_1,
+	PlacedSwap1_2,
+	PlacedSwap1, // full swap 1 has been placed
+
+	PlacedSwap2_1,
+	PlacedSwap2, // full swap 2 has been placed
+	
+	MiddleGame, // color chosen
+	
+	Ended
 }

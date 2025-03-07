@@ -2,7 +2,9 @@
 	<p>Game id: {gameId}</p>
 	
 	{#if gameState}
-		<p>Player on turn: {gameState.playerOnTurn}</p>
+		<p>Player on turn: {gameState.nextTurn?.player}</p>
+		<p>Legal moves: {gameState.nextTurn?.allowedMoveTypes}</p>
+		<p>Debug: {gameState.nextTurn}</p>
 		<p>
 			Players: {gameState.players}
 			<button on:click={() => joinGame()}>Join</button>
