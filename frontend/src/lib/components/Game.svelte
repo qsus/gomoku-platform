@@ -87,7 +87,18 @@
 	let gameState: GameStatusBroadcast;
 
 	function clockClick() {
-		
+		if (!gameState.nextTurn) {
+			alert('Game is not in progress');
+			return;
+		}
+
+		if (gameState.nextTurn.allowedMoveTypes.includes(MoveType.clockOnly)) {
+			socket.emit('playMove', { gameId: $page.params.gameId, move: { moveType: MoveType.clockOnly } }, (status: Status) => {
+				if (!status.success) {
+					alert(status.message);
+				}
+			});
+		}
 	}
 
 	function positionClick(x: number, y: number) {

@@ -9,6 +9,7 @@ import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Aut
 import { PrismaClient, Account } from "@prisma/client";
 import { GameStatusBroadcast as GameStatusBroadcast, MoveType } from "./Transport/GameStatusBroadcast";
 import { z } from "zod";
+import { GamePhase, GameState, GameStateHelper } from "./GameStateHelper";
 
 /**
  * Provides websocket API for clients.
@@ -207,40 +208,22 @@ export class SocketRouter {
 					callback({ success: false, error: ErrorType.Other, message: "Game not found" });
 					return;
 				}
-				const gameState = game.gameState as GameState;
+				const gameStateHelper = new GameStateHelper(game.gameState as GameState);
 			
-				// Check if it is the player's turn
-				const playerOnTurn = game.players[gameState.playerOnTurn];
-				if (!playerOnTurn) {
-					callback({ success: false, error: ErrorType.Other, message: "The player on turn has not joined yet" });
-					return;
-				}
-				if (game.players[gameState.playerOnTurn].id !== socket.data.account.id) {
+				// Check if it is the player's turn; TODO: remove hack for not enough joined players
+				if (game.players[gameStateHelper.getPlayerOnTurn()]?.id !== socket.data.account.id) {
 					callback({ success: false, error: ErrorType.Other, message: "Not your turn" });
 					return;
 				}
 			
-				// Validate moveType and stone presence
-				const { moveType, stone } = validatedData.move;
-				if ((moveType === MoveType.placeOnly || moveType === MoveType.placeAndClock) && !stone) {
-					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "MoveType requires a stone, but none was provided" });
-					return;
-				}
-			
-				// Generate GameState move from request
-				const move: GameState['moves'][0] = {
-					stones: stone ? [stone] : [],
-					pressClock: moveType === MoveType.placeAndClock,
-				};
-			
-				// Play move; TODO: check move validity
-				gameState.moves.push(move);
-				// increment playerOnTurn; NOTE: uses list of players to get player count instead of assuming two
-				gameState.playerOnTurn = (gameState.playerOnTurn + 1) % game.players.length;
+				// Attempt to play the move
+				gameStateHelper.playSimplifiedMove(validatedData.move);
+
+				// Store new game state
 				await this.prisma.game.update({
 					where: { id: validatedData.gameId },
 					data: {
-						gameState: gameState,
+						gameState: gameStateHelper.getGameState(),
 					},
 				});
 			
@@ -315,6 +298,7 @@ export class SocketRouter {
 			try {
 				return await serverFunction(data, callback);
 			} catch (e) {
+				//throw e; // for debugging
 				console.log("Error in server function: " + e);
 				if (e instanceof NotAuthenticatedErrorExample) {
 					callback({ success: false, error: ErrorType.NotAuthenticated, message: e.message });
@@ -355,64 +339,21 @@ export class SocketRouter {
 		});
 		if (!game) return; // TODO: error handling
 
-		let gameStatus = game.gameState as GameState;
-		let board: number[][] = SocketRouter.movesToBoard(gameStatus.moves);
+		let gameStatusHelper = new GameStateHelper(game.gameState as GameState);
+		let board: number[][] = gameStatusHelper.movesToBoard();
 		
-		// determine next stone color; if no stones, default to 1
-		let lastStone = gameStatus.moves[gameStatus.moves.length - 1].stones[gameStatus.moves[gameStatus.moves.length - 1].stones.length - 1];
-		let nextColor = lastStone?.color === 1 ? 2 : 1;
-
 		let gameStatusBroadcast: GameStatusBroadcast = {
 			gameId: gameId,
 			players: game.players.map(player => player.id),
 			//playerOnTurn: gameStatus.playerOnTurn,
 			board: board,
 			nextTurn: {
-				player: gameStatus.playerOnTurn,
-				stone: nextColor,
-				allowedMoveTypes: SocketRouter.getLegalMoveTypes(gameStatus.gamePhase)
+				player: gameStatusHelper.getPlayerOnTurn(),
+				stone: gameStatusHelper.getNextStoneColor(),
+				allowedMoveTypes: gameStatusHelper.getLegalMoveTypes()
 			}
 		};
 		this.io.to('game:' + gameId).emit('gameStatus', gameStatusBroadcast);
-	}
-
-	private static getLegalMoveTypes(gamePhase: GamePhase) {
-		const moveTypeTable = {
-			[GamePhase.Started]: [MoveType.placeOnly, MoveType.fullSwap1],
-
-			[GamePhase.PlacedSwap1_1]: [MoveType.placeOnly],
-			[GamePhase.PlacedSwap1_2]: [MoveType.placeAndClock],
-			[GamePhase.PlacedSwap1]: [MoveType.placeOnly, MoveType.clockOnly, MoveType.placeAndClock, MoveType.chooseColor],
-
-			[GamePhase.PlacedSwap2_1]: [MoveType.clockOnly, MoveType.placeAndClock],
-			[GamePhase.PlacedSwap2]: [MoveType.placeAndClock],
-
-			[GamePhase.MiddleGame]: [MoveType.placeAndClock],
-
-			[GamePhase.Ended]: [],
-		};
-
-		return moveTypeTable[gamePhase];
-	}
-
-	public static movesToBoard(moves: {
-		stones: {
-			x: number;
-			y: number;
-			color: number; // 0 = empty, 1 = black, 2 = white
-		}[],
-		pressClock: boolean;
-	}[]): number[][] {
-		// TODO: not assume 15x15
-		let board = Array.from({ length: 15 }, () => Array(15).fill(0));
-
-		for (let move of moves) {
-			for (let stone of move.stones) {
-				board[stone.y][stone.x] = stone.color;
-			}
-		}
-
-		return board;
 	}
 }
 
@@ -434,31 +375,3 @@ class NotAuthenticatedErrorExample extends Error {
 	}
 }
 
-type GameState = {
-	playerOnTurn: number, // index starting at 0
-	// TODO: gameStarted or gamePhase
-	moves: {
-		stones: {
-			x: number,
-			y: number,
-			color: number // 0 = empty, 1 = black, 2 = white
-		}[],
-		pressClock: boolean
-	}[],
-	gamePhase: GamePhase
-}
-
-enum GamePhase {
-	Started, // waiting for swap 1
-
-	PlacedSwap1_1,
-	PlacedSwap1_2,
-	PlacedSwap1, // full swap 1 has been placed
-
-	PlacedSwap2_1,
-	PlacedSwap2, // full swap 2 has been placed
-	
-	MiddleGame, // color chosen
-	
-	Ended
-}
