@@ -9,6 +9,7 @@
 			Players: {gameState.players}
 			<button on:click={() => joinGame()}>Join</button>
 		</p>
+		<button on:click={() => clockClick()} disabled={!gameState.nextTurn?.allowedMoveTypes?.includes(MoveType.clockOnly)}>Clock</button>
 		<div id="game">
 			<table>
 				<thead>
@@ -73,6 +74,7 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 	import type { GameStatusBroadcast } from '$lib/Transport/GameStatusBroadcast';
+	import { MoveType } from '$lib/Transport/GameStatusBroadcast';
 	import type { Status } from '$lib/Transport/Status';
 	import { onMount } from 'svelte';
 	import { userData } from '$lib/stores/userData';
@@ -83,6 +85,10 @@
 
 	// game status
 	let gameState: GameStatusBroadcast;
+
+	function clockClick() {
+		
+	}
 
 	function positionClick(x: number, y: number) {
 		// for now assume playing simple moves

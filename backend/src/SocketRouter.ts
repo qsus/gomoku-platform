@@ -350,7 +350,7 @@ export class SocketRouter {
 		let board: number[][] = SocketRouter.movesToBoard(gameStatus.moves);
 		
 		// determine next stone color; if no stones, default to 1
-		let lastStone = gameStatus.moves[gameStatus.moves.length - 1].stones[0];
+		let lastStone = gameStatus.moves[gameStatus.moves.length - 1].stones[gameStatus.moves[gameStatus.moves.length - 1].stones.length - 1];
 		let nextColor = lastStone?.color === 1 ? 2 : 1;
 
 		let gameStatusBroadcast: GameStatusBroadcast = {
@@ -361,10 +361,29 @@ export class SocketRouter {
 			nextTurn: {
 				player: gameStatus.playerOnTurn,
 				stone: nextColor,
-				allowedMoveTypes: [MoveType.placeAndClock, MoveType.placeOnly]
+				allowedMoveTypes: SocketRouter.getLegalMoveTypes(gameStatus.gamePhase)
 			}
 		};
 		this.io.to('game:' + gameId).emit('gameStatus', gameStatusBroadcast);
+	}
+
+	private static getLegalMoveTypes(gamePhase: GamePhase) {
+		const moveTypeTable = {
+			[GamePhase.Started]: [MoveType.placeOnly, MoveType.fullSwap1],
+
+			[GamePhase.PlacedSwap1_1]: [MoveType.placeOnly],
+			[GamePhase.PlacedSwap1_2]: [MoveType.placeAndClock],
+			[GamePhase.PlacedSwap1]: [MoveType.placeOnly, MoveType.clockOnly, MoveType.placeAndClock, MoveType.chooseColor],
+
+			[GamePhase.PlacedSwap2_1]: [MoveType.clockOnly, MoveType.placeAndClock],
+			[GamePhase.PlacedSwap2]: [MoveType.placeAndClock],
+
+			[GamePhase.MiddleGame]: [MoveType.placeAndClock],
+
+			[GamePhase.Ended]: [],
+		};
+
+		return moveTypeTable[gamePhase];
 	}
 
 	public static movesToBoard(moves: {

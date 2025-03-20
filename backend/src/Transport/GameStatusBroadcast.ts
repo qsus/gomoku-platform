@@ -15,4 +15,5 @@ export enum MoveType {
 	clockOnly = "clockOnly",
 	fullSwap1 = "fullSwap1", // not used
 	fullSwap2 = "fullSwap2", // not used
+	chooseColor = "chooseColor", // not used
 }
