@@ -8,6 +8,7 @@ import { ErrorType, Status } from "./Transport/Status";
 import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
 import { PrismaClient, Account } from "@prisma/client";
 import { GameStatusBroadcast as GameStatusBroadcast, MoveType } from "./Transport/GameStatusBroadcast";
+import { z } from "zod";
 
 /**
  * Provides websocket API for clients.
@@ -166,77 +167,85 @@ export class SocketRouter {
 				this.notifyGameStatus(requestData.gameId); // notifies user immediately; TODO: notify only this user
 			})));
 
-			socket.on('playMove', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
-				if ( // verify request format
-					!("gameId" in requestData) || typeof requestData.gameId !== 'string' ||
-					!("move" in requestData) || typeof requestData.move !== 'object' ||
-					!("stones" in requestData.move!) || !Array.isArray(requestData.move.stones) ||
-					!("pressClock" in requestData.move!) || typeof requestData.move.pressClock !== 'boolean' ||
-					// for all stones
-					requestData.move.stones.some((stone: any) => {
-						return typeof stone !== 'object' || typeof stone.x !== 'number' || typeof stone.y !== 'number' || typeof stone.color !== 'number';
-					})
-				) {
-					throw new Error("Invalid request format (missing gameId or move)");
-				}
+			// Define schemas using zod
+			const playMoveSchema = z.object({
+				gameId: z.string(),
+				move: z.object({
+					moveType: z.nativeEnum(MoveType),
+					stone:
+						z.object({
+							x: z.number(),
+							y: z.number(),
+							color: z.number(),
+						})
+						.optional(), // stone is optional and depends on MoveType
+				}),
+			});
 
-				// check if user is authenticated
+			// Update playMove handler
+			socket.on('playMove', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {
+				// Validate request format using zod
+				const validationResult = playMoveSchema.safeParse(requestData);
+				if (!validationResult.success) {
+					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: validationResult.error.errors.map(err => err.message).join(", ") });
+					return;
+				}
+				const validatedData = validationResult.data;
+			
+				// Check if user is authenticated
 				if (!socket.data.account) {
 					callback({ success: false, error: ErrorType.NotAuthenticated, message: "Not authenticated" });
 					return;
 				}
-
-				// load game
-				let game = await this.prisma.game.findUnique({ 
-					where: { id: requestData.gameId },
-					include: { players: true }
+			
+				// Load game
+				const game = await this.prisma.game.findUnique({
+					where: { id: validatedData.gameId },
+					include: { players: true },
 				});
 				if (!game) {
 					callback({ success: false, error: ErrorType.Other, message: "Game not found" });
 					return;
 				}
-				let gameState = game.gameState as GameState;
-
-				// check if it is the player's turn
-				console.log(game.players, gameState.playerOnTurn);
-				let playerOnTurn = game.players[gameState.playerOnTurn];
+				const gameState = game.gameState as GameState;
+			
+				// Check if it is the player's turn
+				const playerOnTurn = game.players[gameState.playerOnTurn];
 				if (!playerOnTurn) {
 					callback({ success: false, error: ErrorType.Other, message: "The player on turn has not joined yet" });
 					return;
 				}
-				console.log(game.players[gameState.playerOnTurn].id, socket.data.account);
 				if (game.players[gameState.playerOnTurn].id !== socket.data.account.id) {
 					callback({ success: false, error: ErrorType.Other, message: "Not your turn" });
 					return;
 				}
-				
-				// generate GameState move from request
-				let move: GameState['moves'][0] = {
-					stones: [],
-					pressClock: requestData.move.pressClock
-				};
-				for (let stone of requestData.move.stones) {
-					move.stones.push({
-						x: stone.x,
-						y: stone.y,
-						color: stone.color
-					});
+			
+				// Validate moveType and stone presence
+				const { moveType, stone } = validatedData.move;
+				if ((moveType === MoveType.placeOnly || moveType === MoveType.placeAndClock) && !stone) {
+					callback({ success: false, error: ErrorType.InvalidRequestFormat, message: "MoveType requires a stone, but none was provided" });
+					return;
 				}
-				console.log(move);
-
-				// play move; TODO: check move validity
+			
+				// Generate GameState move from request
+				const move: GameState['moves'][0] = {
+					stones: stone ? [stone] : [],
+					pressClock: moveType === MoveType.placeAndClock,
+				};
+			
+				// Play move; TODO: check move validity
 				gameState.moves.push(move);
 				// increment playerOnTurn; NOTE: uses list of players to get player count instead of assuming two
 				gameState.playerOnTurn = (gameState.playerOnTurn + 1) % game.players.length;
 				await this.prisma.game.update({
-					where: { id: requestData.gameId },
+					where: { id: validatedData.gameId },
 					data: {
-						gameState: gameState
-					}
+						gameState: gameState,
+					},
 				});
-
+			
 				callback({ success: true, message: "Played move" });
-				this.notifyGameStatus(requestData.gameId);
+				this.notifyGameStatus(validatedData.gameId);
 			})));
 
 			socket.on('joinGame', this.withStructureCheck(this.withErrorHandling(async (requestData: object, callback: Callback) => {

@@ -91,26 +91,28 @@
 	}
 
 	function positionClick(x: number, y: number) {
-		// for now assume playing simple moves
 		if (!gameState.nextTurn) {
 			alert('Game is not in progress');
 			return;
 		}
 
-		/*if (!$userData) {
-			alert('Not logged in');
-			return;
-		}*/
+		let allowedMoveTypes = gameState.nextTurn?.allowedMoveTypes;
+		let move;
 
-		/*if (gameState.players[gameState.nextTurn.player] !== $userData.id) {
-			alert('Not your turn');
+		if (allowedMoveTypes.includes(MoveType.placeOnly)) {
+			move = {
+				moveType: MoveType.placeOnly,
+				stone: { x, y, color: gameState.nextTurn.stone },
+			};
+		} else if (allowedMoveTypes.includes(MoveType.placeAndClock)) {
+			move = {
+				moveType: MoveType.placeAndClock,
+				stone: { x, y, color: gameState.nextTurn.stone },
+			};
+		} else {
+			alert('Placing a stone is not a valid move');
 			return;
-		}*/
-
-		let move = {
-			stones: [{ x: x, y: y, color: gameState.nextTurn.stone }],
-			pressClock: true
-		};
+		}
 
 		if (!socket) {
 			alert('Socket not connected');
@@ -121,8 +123,7 @@
 			if (!status.success) {
 				alert(status.message);
 			}
-		})
-
+		});
 	}
 
 	function joinGame() {
