@@ -102,47 +102,11 @@ export class SocketRouter {
 					return;
 				}
 
-				// prepare board
-				let gameSettings = { boardSizeX: 15, boardSizeY: 15 };
-				let board = Array.from({ length: gameSettings.boardSizeY }, () => Array(gameSettings.boardSizeX).fill(''));
-				board[0][0] = 'b'; // example
-				board[0][1] = 'w'; // example
-		
-				let gameState: GameState = { // example
-					playerOnTurn: 0,
-					moves: [
-						{
-							stones: [
-								{
-									x: 0,
-									y: 0,
-									color: 1
-								},
-								{
-									x: 0,
-									y: 1,
-									color: 1
-								}
-							],
-							pressClock: false
-						},
-						{
-							stones: [
-								{
-									x: 1,
-									y: 0,
-									color: 2
-								}
-							],
-							pressClock: true
-						}
-					],
-					gamePhase: GamePhase.Started
-				};
+				let gameStateHelper = GameStateHelper.newGomoku();
 
 				let game = await this.prisma.game.create({
 					data: {
-						gameState: gameState,
+						gameState: gameStateHelper.getGameState(),
 					}
 				})
 				this.notifyGameList();

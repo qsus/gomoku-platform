@@ -10,6 +10,14 @@ export class GameStateHelper {
 	//private originalGameState: GameState;
 	public constructor(private gameState: GameState) {}
 
+	public static newGomoku() {
+		return new GameStateHelper({
+			playerOnTurn: 0,
+			moves: [],
+			gamePhase: GamePhase.Started
+		});
+	}
+
 	public getGameState() {
 		return this.gameState;
 	}
