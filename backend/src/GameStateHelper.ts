@@ -101,11 +101,10 @@ export class GameStateHelper {
 				throw new Error(`Illegal move type: ${move.moveType}`);
 			}
 		} else if (this.gameState.gamePhase === GamePhase.PlacedSwap2_1) {
-			if (move.moveType === MoveType.placeAndClock) {
-				// colors are now determined, but I actually do not need to store it anywhere
+			if (move.moveType === MoveType.placeAndClock) { // let first player choose color
 				place(move.stone!);
 				nextPlayer();
-				stage(GamePhase.MiddleGame);
+				stage(GamePhase.PlacedSwap2_Complete);
 			} else if (move.moveType === MoveType.clockOnly) {
 				// colors are now determined, but I actually do not need to store it anywhere
 				nextPlayer();
