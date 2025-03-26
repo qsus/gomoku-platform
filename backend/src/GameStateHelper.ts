@@ -290,6 +290,7 @@ export class GameStateHelper {
 	}
 
 	public getNextStoneColor(): number {
+		if (this.gameState.moves.length === 0) return 1;
 		let lastMove = this.gameState.moves[this.gameState.moves.length - 1];
 		let lastStone = lastMove.stones[lastMove.stones.length - 1];
 		let lastColor = lastStone.color;
