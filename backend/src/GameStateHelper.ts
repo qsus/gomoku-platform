@@ -1,10 +1,4 @@
-
-import { Server, Socket } from "socket.io";
-import { ErrorType, Status } from "./Transport/Status";
-import { AccountNotFoundError, Authenticator, InvalidPasswordError } from "./Authenticator";
-import { PrismaClient, Account } from "@prisma/client";
 import { GameStatusBroadcast as GameStatusBroadcast, MoveType } from "./Transport/GameStatusBroadcast";
-import { z } from "zod";
 
 export class GameStateHelper {
 	//private originalGameState: GameState;

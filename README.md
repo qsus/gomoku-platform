@@ -1,12 +1,12 @@
 # Gomoku platform
 > [!WARNING]
-This project is work in progress. You should probably not even try to run it.
+This project is not finished.
 
 ## Prerequisites
-- Postgres; table and user name must match those in backend/.env; tables must be generated using `npx prisma db push`
+- PostgreSQL with table and user matching backend/.env. Tables must be generated using `npx prisma db push`.
 - npm
 
-## Running
+## Running (development)
 ### Frontend (SvelteKit)
 In folder `frontend`, run:
 ```bash
@@ -21,4 +21,4 @@ npx tsx watch src/main.ts
 ```
 
 ## Playing
-If you are interested in Gomoku, also called Piškvorky (in Czechia) or Five-in-a-Row, go play it on [playfive](http://playfive.net), [PlayOK](https://playok.net) or join [Gomoku club discord](https://discord.gg/FHTqjG42Bh).
+If you are interested in Gomoku, also called Piškvorky (in Czechia) or Five-in-a-Row, go play it on [Playfive](http://playfive.net), [PlayOK](https://playok.net) or join [Gomoku club discord](https://discord.gg/FHTqjG42Bh).

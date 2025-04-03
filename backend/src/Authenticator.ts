@@ -1,4 +1,4 @@
-import { Account, Prisma, PrismaClient } from "@prisma/client";
+import { Account, PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 
 export class Authenticator {
